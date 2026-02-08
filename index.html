@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Intersol Messenger Pro</title>
+    <style>
+        body { background: #e3efff; font-family: 'Tahoma', sans-serif; margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        
+        /* VENTANA PRINCIPAL */
+        .msn-main { width: 300px; height: 550px; background: white; border: 2px solid #0055e0; border-radius: 8px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.3); position: relative; }
+        .header { background: linear-gradient(#0055e0, #4090ff); color: white; padding: 10px; font-weight: bold; font-size: 13px; border-radius: 5px 5px 0 0; }
+        
+        .user-card { background: #f0f0f0; padding: 12px; border-bottom: 1px solid #ccc; display: flex; align-items: center; }
+        
+        .avatar { 
+            width: 45px; height: 45px; background: #0078d4; border: 2px solid white; border-radius: 4px; 
+            margin-right: 10px; background-size: cover; background-position: center; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        
+        .contact-list { flex-grow: 1; overflow-y: auto; padding: 10px; background: white; }
+        .contact { display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; border-bottom: 1px solid #f9f9f9; }
+        .contact:hover { background: #e1eefc; }
+        .status-dot { width: 10px; height: 10px; background: #31a24c; border-radius: 50%; margin-right: 10px; border: 1px solid #257a39; }
+
+        /* VENTANA DE CHAT */
+        #chat-window { display: none; position: absolute; top: 50px; left: 310px; width: 350px; height: 450px; background: #f0f0f0; border: 2px solid #0055e0; border-radius: 8px; flex-direction: column; box-shadow: 0 5px 20px rgba(0,0,0,0.2); }
+        #chat-msgs { flex-grow: 1; background: white; margin: 10px; padding: 10px; overflow-y: auto; border: 1px solid #ccc; font-size: 13px; line-height: 1.4; }
+        .chat-input-area { padding: 10px; display: flex; gap: 5px; align-items: center; background: #f0f0f0; }
+        input[type="text"] { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 3px; }
+        .btn-tool { background: none; border: none; font-size: 20px; cursor: pointer; padding: 0 5px; transition: transform 0.1s; }
+        .btn-tool:hover { transform: scale(1.2); }
+        button#send-btn { background: #0055e0; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; font-weight: bold; }
+
+        /* ANIMACIÓN ZUMBIDO */
+        @keyframes shake-nudge {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-3px, -2px) rotate(-1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            50% { transform: translate(-1px, 2px) rotate(1deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            100% { transform: translate(1px, -2px) rotate(0deg); }
+        }
+        .vibrar { animation: shake-nudge 0.5s; animation-iteration-count: 2; }
+        
+        /* Ajuste para móviles */
+        @media (max-width: 600px) {
+            #chat-window { left: 0; top: 0; width: 100%; height: 100%; z-index: 100; }
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="nudge-sound" src="https://www.myinstants.com/media/sounds/msn-nudge.mp3"></audio>
+
+    <div class="msn-main" id="main-win">
+        <div class="header">Intersol Messenger</div>
+        <div class="user-card">
+            <input type="file" id="profile-input" style="display:none" accept="image/*">
+            <div class="avatar" id="my-avatar" title="Cambiar foto"></div>
+            <div>
+                <b id="my-name" style="color:#0055e0">Cargando...</b><br>
+                <small id="my-email" style="color:#666"></small>
+            </div>
+        </div>
+        <div class="contact-list">
+            <div style="font-size:11px; font-weight:bold; color:#666; margin-bottom:10px; padding-left:5px;">CONECTADOS (<span id="count">0</span>)</div>
+            <div id="users-list"></div>
+        </div>
+        <div style="padding:5px; text-align:center; font-size:10px; color:#999; border-top:1px solid #eee;">Intersol ID Service</div>
+    </div>
+
+    <div id="chat-window">
+        <div class="header" id="chat-with-header" style="display:flex; justify-content:space-between">
+            <span id="chat-title">Conversación</span>
+            <span id="close-chat" style="cursor:pointer; padding:0 5px;">X</span>
+        </div>
+        <div id="chat-msgs"></div>
+        <div class="chat-input-area">
+            <button class="btn-tool" id="btn-nudge" title="Enviar zumbido">🔔</button>
+            <button class="btn-tool" id="btn-file" title="Adjuntar archivo">📎</button>
+            <input type="file" id="file-input" style="display:none">
+            
+            <input type="text" id="chat-input" placeholder="Escribe un mensaje...">
+            <button id="send-btn">Enviar</button>
+        </div>
+    </div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
+    import { getDatabase, ref, onValue, push, serverTimestamp, update, off } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyAWMmRpC9chHuBMWbMCRFeEzhQjh1dJ0Uw",
+        databaseURL: "https://intersol-ce061-default-rtdb.firebaseio.com",
+        projectId: "intersol-ce061",
+        appId: "1:582674758781:web:aa6326c6d84b675c504514"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const session = JSON.parse(localStorage.getItem('intersol_user'));
+
+    let chatActivo = null;
+    let primeraCarga = true;
+
+    // --- SOLICITAR NOTIFICACIONES ---
+    if ("Notification" in window) {
+        if (Notification.permission !== "granted") {
+            Notification.requestPermission();
+        }
+    }
+
+    if (!session) {
+        alert("Debes iniciar sesión primero.");
+        window.location.href = "hotmail.html";
+    } else {
+        document.getElementById('my-name').innerText = session.nombre;
+        document.getElementById('my-email').innerText = session.email;
+
+        // CARGAR LISTA DE CONTACTOS
+        onValue(ref(db, 'intersol/usuarios'), (snap) => {
+            const cont = document.getElementById('users-list');
+            cont.innerHTML = "";
+            let c = 0;
+            snap.forEach(u => {
+                const user = u.val();
+                if(user.email === session.email) {
+                    if(user.foto) document.getElementById('my-avatar').style.backgroundImage = `url(${user.foto})`;
+                } else {
+                    c++;
+                    const div = document.createElement('div');
+                    div.className = 'contact';
+                    const fotoChat = user.foto ? `background-image:url(${user.foto})` : '';
+                    div.innerHTML = `
+                        <div class="status-dot"></div> 
+                        <div class="avatar" style="width:30px; height:30px; margin-right:10px; ${fotoChat}"></div>
+                        <b>${user.nombre}</b>`;
+                    div.onclick = () => abrirChat(user);
+                    cont.appendChild(div);
+                }
+            });
+            document.getElementById('count').innerText = c;
+        });
+    }
+
+    // --- LÓGICA DE CHAT ---
+
+    window.abrirChat = (user) => {
+        chatActivo = user;
+        primeraCarga = true; // Reset para el nuevo chat
+        document.getElementById('chat-window').style.display = 'flex';
+        document.getElementById('chat-title').innerText = "Conversación con " + user.nombre;
+        cargarMensajes();
+    };
+
+    document.getElementById('close-chat').onclick = () => {
+        document.getElementById('chat-window').style.display = 'none';
+        if (chatActivo) {
+            const chatID = [session.email, chatActivo.email].sort().join('_').replace(/\./g, '_');
+            off(ref(db, 'intersol/chats/' + chatID));
+        }
+        chatActivo = null;
+    };
+
+    function cargarMensajes() {
+        const chatID = [session.email, chatActivo.email].sort().join('_').replace(/\./g, '_');
+        onValue(ref(db, 'intersol/chats/' + chatID), (snap) => {
+            const box = document.getElementById('chat-msgs');
+            box.innerHTML = "";
+            
+            let ultimoMsg = null;
+
+            snap.forEach(m => {
+                ultimoMsg = m.val();
+                let contenido = ultimoMsg.text;
+
+                if(ultimoMsg.type === 'nudge') {
+                    contenido = `<b style="color:#d32f2f;">¡HA ENVIADO UN ZUMBIDO!</b>`;
+                    ejecutarEfectoZumbido();
+                } 
+                else if(ultimoMsg.type === 'file') {
+                    const esImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(ultimoMsg.fileName);
+                    contenido = esImg 
+                        ? `<br><img src="${ultimoMsg.text}" style="max-width:180px; border-radius:4px; margin-top:5px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${ultimoMsg.text}')">`
+                        : `<br><button class="btn-descarga" onclick="descargarArchivo('${ultimoMsg.text}', '${ultimoMsg.fileName}')">📄 Descargar: ${ultimoMsg.fileName}</button>`;
+                }
+
+                box.innerHTML += `<div style="margin-bottom:8px;"><b>${ultimoMsg.user}:</b> ${contenido}</div>`;
+            });
+
+            // NOTIFICACIONES (Solo si la pestaña está oculta y no es nuestro mensaje)
+            if (!primeraCarga && ultimoMsg && ultimoMsg.user !== session.nombre && document.hidden) {
+                const bodyNoti = ultimoMsg.type === 'nudge' ? "¡Zumbido!" : (ultimoMsg.type === 'file' ? "Te envió un archivo" : ultimoMsg.text);
+                new Notification(`Mensaje de ${ultimoMsg.user}`, { body: bodyNoti });
+            }
+
+            box.scrollTop = box.scrollHeight;
+            primeraCarga = false;
+        });
+    }
+
+    function ejecutarEfectoZumbido() {
+        const win = document.getElementById('main-win');
+        win.classList.remove('vibrar');
+        void win.offsetWidth; 
+        win.classList.add('vibrar');
+        const audio = document.getElementById('nudge-sound');
+        audio.currentTime = 0;
+        audio.play().catch(()=>{});
+    }
+
+    window.enviarMensaje = () => {
+        const input = document.getElementById('chat-input');
+        if(!input.value || !chatActivo) return;
+        const chatID = [session.email, chatActivo.email].sort().join('_').replace(/\./g, '_');
+        push(ref(db, 'intersol/chats/' + chatID), {
+            user: session.nombre,
+            text: input.value,
+            time: serverTimestamp()
+        });
+        input.value = "";
+    };
+
+    // --- ACCIONES DE HERRAMIENTAS ---
+
+    document.getElementById('btn-nudge').onclick = () => {
+        if(!chatActivo) return;
+        const chatID = [session.email, chatActivo.email].sort().join('_').replace(/\./g, '_');
+        push(ref(db, 'intersol/chats/' + chatID), {
+            user: session.nombre,
+            text: "",
+            type: 'nudge',
+            time: serverTimestamp()
+        });
+    };
+
+    document.getElementById('btn-file').onclick = () => document.getElementById('file-input').click();
+    document.getElementById('file-input').onchange = (e) => {
+        const file = e.target.files[0];
+        if(!file || !chatActivo) return;
+        if(file.size > 900000) return alert("El archivo es muy pesado (máximo 900KB)");
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const chatID = [session.email, chatActivo.email].sort().join('_').replace(/\./g, '_');
+            push(ref(db, 'intersol/chats/' + chatID), {
+                user: session.nombre,
+                text: reader.result,
+                type: 'file',
+                fileName: file.name,
+                time: serverTimestamp()
+            });
+        };
+        reader.readAsDataURL(file);
+    };
+
+    document.getElementById('my-avatar').onclick = () => document.getElementById('profile-input').click();
+    document.getElementById('profile-input').onchange = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const userKey = session.email.replace(/\./g, '_');
+            update(ref(db, `intersol/usuarios/${userKey}`), { foto: reader.result });
+            session.foto = reader.result;
+            localStorage.setItem('intersol_user', JSON.stringify(session));
+        };
+        reader.readAsDataURL(file);
+    };
+
+    window.descargarArchivo = (base64, nombre) => {
+        const a = document.createElement("a");
+        a.href = base64;
+        a.download = nombre;
+        a.click();
+    };
+
+    document.getElementById('send-btn').onclick = enviarMensaje;
+    document.getElementById('chat-input').onkeypress = (e) => { if(e.key === 'Enter') enviarMensaje(); };
+</script>
+</body>
+</html>
